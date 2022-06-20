@@ -127,34 +127,31 @@ func (db *DB) check(key string) (err error) {
 	if db.offset >= db.opt.BlockSize {
 		db.index++
 		filename := db.dir + "/" + strconv.FormatUint(db.index, 10) + ".dat"
+		prev := db.data
 		db.data, err = os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0755)
 		if err != nil {
 			return err
 		}
 		db.offset = 0
-	}
-	if db.keys[key] != nil {
-		oldKey := db.keys[key]
-		if oldKey.Index != db.index {
-			go func() {
-				// 不是当前分块，需要同步
-				if err := db.async(oldKey); err != nil {
-					log.Println("async:", err)
-				}
-			}()
+		if db.keys[key] != nil {
+			oldKey := db.keys[key]
+			if oldKey.Index != db.index {
+				go func() {
+					// 不是当前分块，需要同步
+					if err := db.async(oldKey, prev); err != nil {
+						log.Println("async:", err)
+					}
+				}()
+				return
+			}
+			// 当前并不立即同步，而是等到下一次分块时同步
+			db.delKeys = append(db.delKeys, db.keys[key])
 		}
-		return nil
 	}
-	// 当前并不立即同步，而是等到下一次分块时同步
-	db.delKeys = append(db.delKeys, db.keys[key])
 	return nil
 }
 
-func (db *DB) async(key *Key) error {
-	fi, err := os.OpenFile(db.dir+"/"+strconv.FormatUint(key.Index, 10)+".dat", os.O_RDWR, 0755)
-	if err != nil {
-		return err
-	}
+func (db *DB) async(key *Key, fi *os.File) error {
 	defer func() {
 		_ = fi.Close()
 	}()
@@ -163,8 +160,8 @@ func (db *DB) async(key *Key) error {
 		return err
 	}
 	// left data
-	left := make([]byte, key.Size)
-	_, err = fi.Read(left)
+	left := make([]byte, key.Offset)
+	_, err = fi.ReadAt(left, 0)
 	if err != nil {
 		return err
 	}
