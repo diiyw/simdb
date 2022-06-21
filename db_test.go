@@ -2,6 +2,7 @@ package binDB
 
 import (
 	"os"
+	"strconv"
 	"testing"
 )
 
@@ -14,26 +15,57 @@ func TestDB(t *testing.T) {
 	defer func() {
 		_ = db.Close()
 	}()
-	if err := db.Put("key", "value"); err != nil {
-		t.Error("put error")
+	var kv = map[string]string{
+		"key1": "value1",
+		"key2": "value2",
+		"key3": "value3",
 	}
-	var result string
-	err = db.Get("key", &result)
-	if err != nil {
-		t.Error(err)
+	for k, v := range kv {
+		if err := db.Put(k, v); err != nil {
+			t.Error("put error")
+		}
+		var result string
+		err = db.Get(k, &result)
+		if err != nil {
+			t.Error(err)
+		}
+		if result != v {
+			t.Error("get error")
+		}
 	}
-	if result != "value" {
-		t.Error("get error")
+}
+
+func TestDB_PutSameKey(t *testing.T) {
+	db := getDB(&Option{
+		BlockSize: 1024 * 1024,
+	})
+	defer func() {
+		_ = db.Close()
+	}()
+	for i := 0; i < 1000000; i++ {
+		if err := db.Put("key", "value"); err != nil {
+			t.Error(err)
+		}
 	}
-	if err := db.Put("key1", "value1"); err != nil {
-		t.Error("put error")
+}
+
+func TestDB_PutDiffKeyAndGet(t *testing.T) {
+	db := getDB(&Option{
+		BlockSize: 1024 * 1024,
+	})
+	defer func() {
+		_ = db.Close()
+	}()
+	for i := 0; i < 1000000; i++ {
+		if err := db.Put(strconv.Itoa(i), i); err != nil {
+			t.Error(err)
+		}
 	}
-	err = db.Get("key1", &result)
-	if err != nil {
-		t.Error(err)
-	}
-	if result != "value1" {
-		t.Error("get error")
+	for i := 0; i < 1000000; i++ {
+		var v int
+		if err := db.Get(strconv.Itoa(i), &v); err != nil || v != i {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -65,20 +97,6 @@ func BenchmarkGet(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		if err := db.Get("key", &v); err != nil {
 			b.Error("get error", err)
-		}
-	}
-}
-
-func TestDB_Put(t *testing.T) {
-	db := getDB(&Option{
-		BlockSize: 1024 * 1024,
-	})
-	defer func() {
-		_ = db.Close()
-	}()
-	for i := 0; i < 1000000; i++ {
-		if err := db.Put("key", "value"); err != nil {
-			t.Error(err)
 		}
 	}
 }
