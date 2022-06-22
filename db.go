@@ -143,7 +143,7 @@ func (db *DB) readAt(key *Key, v any) error {
 			return err
 		}
 	} else {
-		copy(data, db.cache[key.Offset:key.Offset+key.Size])
+		data = db.cache[key.Offset : key.Offset+key.Size]
 	}
 	if err := binary.Unmarshal(data, v); err != nil {
 		return err
@@ -255,6 +255,9 @@ func (db *DB) Close() error {
 	}
 	if err := db.FSync(); err != nil {
 		return err
+	}
+	for _, fi := range db.files {
+		_ = fi.Close()
 	}
 	return db.dataFile.Close()
 }
