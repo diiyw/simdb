@@ -1,10 +1,10 @@
-package binDB
+package simdb
 
 import (
+	"bytes"
 	"errors"
 	"github.com/kelindar/binary"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"strconv"
@@ -12,11 +12,10 @@ import (
 
 type DB struct {
 	dir      string
-	keys     map[string]*Key
+	keys     KeyMap
 	dataFile *os.File
-	cache    []byte
-	index    uint64 // current dataFile file index
-	offset   int64  // the offset of the dataFile file
+	cache    bytes.Buffer
+	index    int // current dataFile file index
 	opt      *Option
 	files    []*os.File
 }
@@ -30,14 +29,14 @@ func Open(dir string, opt *Option) (*DB, error) {
 	}
 	var db = &DB{
 		dir:   dir,
-		files: make([]*os.File, 0, 1024),
+		files: make([]*os.File, 0, 64),
 	}
 	if opt == nil {
 		db.opt = DefaultOption
 	} else {
 		db.opt = opt
 	}
-	db.cache = make([]byte, 0, db.opt.BlockSize)
+	db.cache.Grow(db.opt.BlockSize)
 	if err := db.loadKeys(); err != nil {
 		return nil, err
 	}
@@ -55,11 +54,19 @@ func (db *DB) loadKeys() error {
 	defer func() {
 		_ = keyFile.Close()
 	}()
-	keyData, err := ioutil.ReadAll(keyFile)
+	fiInfo, err := keyFile.Stat()
 	if err != nil {
 		return err
 	}
-	db.keys, err = InitKeyData(keyData)
+	keyData := make([]byte, fiInfo.Size())
+	_, err = keyFile.Read(keyData)
+	if err != nil {
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	db.keys, err = NewKeyMap(keyData)
 	if err != nil {
 		return err
 	}
@@ -85,16 +92,15 @@ func (db *DB) loadData() error {
 			return err
 		}
 	}
-	filename := db.dir + "/" + strconv.FormatUint(db.index, 10) + ".dat"
+	filename := db.dir + "/" + strconv.Itoa(db.index) + ".dat"
 	db.dataFile, err = os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0755)
 	if err != nil {
 		return err
 	}
-	db.cache, err = ioutil.ReadAll(db.dataFile)
+	_, err = io.Copy(&db.cache, db.dataFile)
 	if err != nil {
 		return err
 	}
-	db.offset, err = db.dataFile.Seek(0, io.SeekEnd)
 	if db.index != 0 {
 		for i := 0; i < int(db.index); i++ {
 			filename = db.dir + "/" + strconv.FormatUint(uint64(i), 10) + ".dat"
@@ -109,21 +115,46 @@ func (db *DB) loadData() error {
 }
 
 func (db *DB) Put(key string, v any) error {
-	data, err := binary.Marshal(v)
-	if err != nil {
+	before := db.cache.Len()
+	if err := binary.MarshalTo(v, &db.cache); err != nil {
 		return err
 	}
-	if err = db.check(key); err != nil {
-		return err
-	}
-	size := int64(len(data))
-	db.cache = append(db.cache, data...)
-	db.keys[key] = &Key{
+	size := db.cache.Len() - before
+	newKey := &Key{
 		Index:  db.index,
-		Offset: db.offset,
+		Offset: before,
 		Size:   size,
 	}
-	db.offset += size
+	if db.keys[key] != nil {
+		oldKey := db.keys[key]
+		if oldKey.Index != db.index {
+			go func() {
+				// 不是当前分块，需要同步
+				if err := db.async(oldKey); err != nil {
+					log.Println("async:", err)
+				}
+			}()
+		} else {
+			// 同步
+			if err := db.sync(oldKey, newKey); err != nil {
+				return err
+			}
+		}
+	}
+	var err error
+	if db.cache.Len()+size >= db.opt.BlockSize {
+		if err := db.fSync(); err != nil {
+			return err
+		}
+		db.index++
+		db.files = append(db.files, db.dataFile)
+		filename := db.dir + "/" + strconv.Itoa(db.index) + ".dat"
+		db.dataFile, err = os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0755)
+		if err != nil {
+			return err
+		}
+	}
+	db.keys[key] = newKey
 	return nil
 }
 
@@ -138,12 +169,12 @@ func (db *DB) readAt(key *Key, v any) error {
 	data := make([]byte, key.Size)
 	if key.Index != db.index {
 		fi := db.files[key.Index]
-		_, err := fi.ReadAt(data, key.Offset)
+		_, err := fi.ReadAt(data, int64(key.Offset))
 		if err != nil {
 			return err
 		}
 	} else {
-		data = db.cache[key.Offset : key.Offset+key.Size]
+		data = db.cache.Bytes()[key.Offset : key.Offset+key.Size]
 	}
 	if err := binary.Unmarshal(data, v); err != nil {
 		return err
@@ -151,48 +182,30 @@ func (db *DB) readAt(key *Key, v any) error {
 	return nil
 }
 
-func (db *DB) check(key string) (err error) {
-	if db.keys[key] != nil {
-		oldKey := db.keys[key]
-		if oldKey.Index != db.index {
-			go func() {
-				// 不是当前分块，需要同步
-				if err := db.async(oldKey); err != nil {
-					log.Println("async:", err)
-				}
-			}()
-		} else {
-			// 同步
-			db.sync(oldKey)
-		}
-	}
-	if db.offset >= db.opt.BlockSize {
-		if err := db.FSync(); err != nil {
-			return err
-		}
-		db.index++
-		db.files = append(db.files, db.dataFile)
-		filename := db.dir + "/" + strconv.FormatUint(db.index, 10) + ".dat"
-		db.dataFile, err = os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0755)
-		if err != nil {
-			return err
-		}
-		db.offset = 0
-	}
-	return nil
-}
-
-func (db *DB) FSync() error {
-	if _, err := db.dataFile.Write(db.cache); err != nil {
+func (db *DB) fSync() error {
+	if err := db.dataFile.Truncate(0); err != nil {
 		return err
 	}
-	db.cache = make([]byte, 0, db.opt.BlockSize)
+	if _, err := db.cache.WriteTo(db.dataFile); err != nil {
+		return err
+	}
+	db.cache = bytes.Buffer{}
 	return nil
 }
 
-func (db *DB) sync(key *Key) {
-	db.cache = append(db.cache[:key.Offset], db.cache[key.Offset+key.Size:]...)
-	db.offset -= key.Size
+func (db *DB) sync(key *Key, newKey *Key) error {
+	data := db.cache.Bytes()
+	db.cache.Truncate(0)
+	n, err := db.cache.Write(data[:key.Offset])
+	if err != nil {
+		return err
+	}
+	newKey.Offset = n
+	n, err = db.cache.Write(data[key.Offset : key.Offset+key.Size])
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (db *DB) async(key *Key) error {
@@ -208,7 +221,7 @@ func (db *DB) async(key *Key) error {
 		return err
 	}
 	var right []byte
-	splitOffset := key.Offset + key.Size
+	splitOffset := int64(key.Offset + key.Size)
 	if splitOffset < stat.Size() {
 		ret, _ := fi.Seek(splitOffset, io.SeekStart)
 		// 读取到结尾所有数据
@@ -239,7 +252,7 @@ func (db *DB) async(key *Key) error {
 
 // Close closes the database.
 func (db *DB) Close() error {
-	keyData, err := binary.Marshal(db.keys)
+	keyData, err := db.keys.Marshal()
 	if err != nil {
 		return err
 	}
@@ -253,7 +266,7 @@ func (db *DB) Close() error {
 	if err := os.WriteFile(db.dir+"/index", indexData, 0755); err != nil {
 		return err
 	}
-	if err := db.FSync(); err != nil {
+	if err := db.fSync(); err != nil {
 		return err
 	}
 	for _, fi := range db.files {

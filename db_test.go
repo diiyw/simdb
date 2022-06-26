@@ -1,10 +1,20 @@
-package binDB
+package simdb
 
 import (
 	"os"
 	"strconv"
 	"testing"
 )
+
+var db *DB
+
+func init() {
+	var err error
+	db, err = Open("./testdata/testDB", nil)
+	if err != nil {
+		panic(err)
+	}
+}
 
 func TestDB(t *testing.T) {
 	_ = os.RemoveAll("./testdata/testDB")
@@ -69,7 +79,7 @@ func TestDB_PutDiffKeyAndGet(t *testing.T) {
 	}
 }
 
-func BenchmarkPut(b *testing.B) {
+func BenchmarkSameKeyPut(b *testing.B) {
 	_ = os.RemoveAll("./testdata/testDB")
 	db, err := Open("./testdata/testDB", nil)
 	if err != nil {
@@ -79,13 +89,13 @@ func BenchmarkPut(b *testing.B) {
 		_ = db.Close()
 	}()
 	for i := 0; i < b.N; i++ {
-		if err := db.Put("key", "value"); err != nil {
+		if err := db.Put("key", i); err != nil {
 			b.Error("put error")
 		}
 	}
 }
 
-func BenchmarkGet(b *testing.B) {
+func BenchmarkSameKeyGet(b *testing.B) {
 	db, err := Open("./testdata/testDB", nil)
 	if err != nil {
 		b.Error(err)
@@ -96,6 +106,31 @@ func BenchmarkGet(b *testing.B) {
 	var v string
 	for i := 0; i < b.N; i++ {
 		if err := db.Get("key", &v); err != nil {
+			b.Error("get error", err)
+		}
+	}
+}
+
+func BenchmarkDiffKeyPut(b *testing.B) {
+	_ = os.RemoveAll("./testdata/testDB")
+	db, err := Open("./testdata/testDB", &Option{
+		BlockSize: 1024 * 1024,
+	})
+	if err != nil {
+		b.Error(err)
+	}
+	for i := 0; i < b.N; i++ {
+		if err := db.Put(strconv.Itoa(i), i); err != nil {
+			b.Error("put error")
+		}
+	}
+	_ = db.Close()
+}
+
+func BenchmarkDiffKeyGet(b *testing.B) {
+	var v int
+	for i := 0; i < b.N; i++ {
+		if err := db.Get(strconv.Itoa(i), &v); err != nil || v != i {
 			b.Error("get error", err)
 		}
 	}

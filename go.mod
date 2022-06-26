@@ -1,4 +1,4 @@
-module github.com/diiyw/binDB
+module github.com/diiyw/simdb
 
 go 1.18
 

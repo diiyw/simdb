@@ -1,7 +1,7 @@
-package binDB
+package simdb
 
 type Option struct {
-	BlockSize int64
+	BlockSize int
 }
 
 var DefaultOption = &Option{
