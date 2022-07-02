@@ -252,6 +252,17 @@ func (db *DB) async(key *Key) error {
 
 // Close closes the database.
 func (db *DB) Close() error {
+	if err := db.Save(); err != nil {
+		for _, fi := range db.files {
+			_ = fi.Close()
+		}
+		return db.dataFile.Close()
+	}
+	return nil
+}
+
+// Save saves the database.
+func (db *DB) Save() error {
 	keyData, err := db.keys.Marshal()
 	if err != nil {
 		return err
@@ -269,10 +280,7 @@ func (db *DB) Close() error {
 	if err := db.fSync(); err != nil {
 		return err
 	}
-	for _, fi := range db.files {
-		_ = fi.Close()
-	}
-	return db.dataFile.Close()
+	return nil
 }
 
 func fileIsExist(filename string) bool {
