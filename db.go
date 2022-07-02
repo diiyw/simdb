@@ -143,7 +143,7 @@ func (db *DB) Put(key string, v any) error {
 	}
 	var err error
 	if db.cache.Len()+size >= db.opt.BlockSize {
-		if err := db.fSync(); err != nil {
+		if err := db.fSync(true); err != nil {
 			return err
 		}
 		db.index++
@@ -182,14 +182,16 @@ func (db *DB) readAt(key *Key, v any) error {
 	return nil
 }
 
-func (db *DB) fSync() error {
+func (db *DB) fSync(clean bool) error {
 	if err := db.dataFile.Truncate(0); err != nil {
 		return err
 	}
 	if _, err := db.cache.WriteTo(db.dataFile); err != nil {
 		return err
 	}
-	db.cache = bytes.Buffer{}
+	if clean {
+		db.cache.Reset()
+	}
 	return nil
 }
 
@@ -277,7 +279,7 @@ func (db *DB) Save() error {
 	if err := os.WriteFile(db.dir+"/index", indexData, 0755); err != nil {
 		return err
 	}
-	if err := db.fSync(); err != nil {
+	if err := db.fSync(false); err != nil {
 		return err
 	}
 	return nil
