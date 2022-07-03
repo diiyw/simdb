@@ -58,6 +58,10 @@ func (db *DB) loadKeys() error {
 	if err != nil {
 		return err
 	}
+	if fiInfo.Size() == 0 {
+		db.keys = make(map[string]*Key)
+		return nil
+	}
 	keyData := make([]byte, fiInfo.Size())
 	_, err = keyFile.Read(keyData)
 	if err != nil {
@@ -101,8 +105,11 @@ func (db *DB) loadData() error {
 	if err != nil {
 		return err
 	}
+	if err = db.dataFile.Truncate(0); err != nil {
+		return err
+	}
 	if db.index != 0 {
-		for i := 0; i < int(db.index); i++ {
+		for i := 0; i < db.index; i++ {
 			filename = db.dir + "/" + strconv.FormatUint(uint64(i), 10) + ".dat"
 			fi, err := os.OpenFile(filename, os.O_RDWR, 0755)
 			if err != nil {
@@ -125,8 +132,7 @@ func (db *DB) Put(key string, v any) error {
 		Offset: before,
 		Size:   size,
 	}
-	if db.keys[key] != nil {
-		oldKey := db.keys[key]
+	if oldKey := db.keys[key]; oldKey != nil {
 		if oldKey.Index != db.index {
 			go func() {
 				// 不是当前分块，需要同步
@@ -149,6 +155,7 @@ func (db *DB) Put(key string, v any) error {
 		db.index++
 		db.files = append(db.files, db.dataFile)
 		filename := db.dir + "/" + strconv.Itoa(db.index) + ".dat"
+		_ = db.dataFile.Close()
 		db.dataFile, err = os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0755)
 		if err != nil {
 			return err
@@ -159,10 +166,11 @@ func (db *DB) Put(key string, v any) error {
 }
 
 func (db *DB) Get(key string, v any) error {
-	if db.keys[key] == nil {
+	keyInfo := db.keys[key]
+	if keyInfo == nil {
 		return errors.New("keys not found")
 	}
-	return db.readAt(db.keys[key], v)
+	return db.readAt(keyInfo, v)
 }
 
 func (db *DB) readAt(key *Key, v any) error {
@@ -183,9 +191,6 @@ func (db *DB) readAt(key *Key, v any) error {
 }
 
 func (db *DB) fSync(clean bool) error {
-	if err := db.dataFile.Truncate(0); err != nil {
-		return err
-	}
 	if _, err := db.cache.WriteTo(db.dataFile); err != nil {
 		return err
 	}
