@@ -119,8 +119,8 @@ func BenchmarkDiffKeyGet(b *testing.B) {
 }
 
 func getDB(option *Option) *DB {
-	_ = os.RemoveAll("./testdata/testDB")
-	db, err := Open("./testdata/testDB", option)
+	_ = os.RemoveAll("./testdata/testdb")
+	db, err := Open("./testdata/testdb", option)
 	if err != nil {
 		panic(err)
 	}

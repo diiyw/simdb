@@ -13,7 +13,7 @@ import (
 type DB struct {
 	dir      string
 	keys     KeyMap
-	dataFile *os.File
+	dataFile string
 	cache    bytes.Buffer
 	index    int // current dataFile file index
 	opt      *Option
@@ -96,27 +96,23 @@ func (db *DB) loadData() error {
 			return err
 		}
 	}
-	filename := db.dir + "/" + strconv.Itoa(db.index) + ".dat"
-	db.dataFile, err = os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0755)
+	db.dataFile = db.dir + "/" + strconv.Itoa(db.index) + ".dat"
+	dataFile, err := os.OpenFile(db.dataFile, os.O_RDONLY|os.O_CREATE, 0755)
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(&db.cache, db.dataFile)
+	defer dataFile.Close()
+	_, err = io.Copy(&db.cache, dataFile)
 	if err != nil {
 		return err
 	}
-	if err = db.dataFile.Truncate(0); err != nil {
-		return err
-	}
-	if db.index != 0 {
-		for i := 0; i < db.index; i++ {
-			filename = db.dir + "/" + strconv.FormatUint(uint64(i), 10) + ".dat"
-			fi, err := os.OpenFile(filename, os.O_RDWR, 0755)
-			if err != nil {
-				return err
-			}
-			db.files = append(db.files, fi)
+	for i := 0; i < db.index; i++ {
+		filename := db.dir + "/" + strconv.FormatUint(uint64(i), 10) + ".dat"
+		fi, err := os.OpenFile(filename, os.O_RDONLY, 0755)
+		if err != nil {
+			return err
 		}
+		db.files = append(db.files, fi)
 	}
 	return err
 }
@@ -147,19 +143,17 @@ func (db *DB) Put(key string, v any) error {
 			}
 		}
 	}
-	var err error
 	if db.cache.Len()+size >= db.opt.BlockSize {
 		if err := db.fSync(true); err != nil {
 			return err
 		}
 		db.index++
-		db.files = append(db.files, db.dataFile)
 		filename := db.dir + "/" + strconv.Itoa(db.index) + ".dat"
-		_ = db.dataFile.Close()
-		db.dataFile, err = os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0755)
+		dataFile, err := os.OpenFile(filename, os.O_RDONLY|os.O_CREATE, 0755)
 		if err != nil {
 			return err
 		}
+		db.files = append(db.files, dataFile)
 	}
 	db.keys[key] = newKey
 	return nil
@@ -191,7 +185,7 @@ func (db *DB) readAt(key *Key, v any) error {
 }
 
 func (db *DB) fSync(clean bool) error {
-	if _, err := db.cache.WriteTo(db.dataFile); err != nil {
+	if err := os.WriteFile(db.dataFile, db.cache.Bytes(), 0755); err != nil {
 		return err
 	}
 	if clean {
@@ -263,7 +257,6 @@ func (db *DB) Close() error {
 		for _, fi := range db.files {
 			_ = fi.Close()
 		}
-		return db.dataFile.Close()
 	}
 	return nil
 }
