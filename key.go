@@ -11,22 +11,37 @@ type Key struct {
 	Size   int
 }
 
-type KeyMap map[string]*Key
+type Keys struct {
+	ReadyDel []Key
+	M        map[string]*Key
+}
 
-func NewKeyMap(data []byte) (KeyMap, error) {
-	var keyMap = map[string]*Key{}
+func NewKeyMap(data []byte) (*Keys, error) {
+	var keyMap = &Keys{}
 	if err := binary.Unmarshal(data, &keyMap); err != nil && err.Error() != "EOF" {
 		return nil, err
 	}
 	return keyMap, nil
 }
 
-func (k KeyMap) Marshal() ([]byte, error) {
+func (k *Keys) Marshal() ([]byte, error) {
 	buf := bytes.Buffer{}
-	buf.Grow(len(k) * 24)
+	buf.Grow(len(k.M)*12 + len(k.ReadyDel)*12)
 	err := binary.MarshalTo(k, &buf)
 	if err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func (k *Keys) Set(key string, ky *Key) {
+	k.M[key] = ky
+}
+
+func (k *Keys) Get(key string) *Key {
+	return k.M[key]
+}
+
+func (k *Keys) Del(key *Key) {
+	k.ReadyDel = append(k.ReadyDel, *key)
 }

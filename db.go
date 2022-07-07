@@ -5,14 +5,13 @@ import (
 	"errors"
 	"github.com/kelindar/binary"
 	"io"
-	"log"
 	"os"
 	"strconv"
 )
 
 type DB struct {
 	dir      string
-	keys     KeyMap
+	keys     *Keys
 	dataFile string
 	cache    bytes.Buffer
 	index    int // current dataFile file index
@@ -59,7 +58,10 @@ func (db *DB) loadKeys() error {
 		return err
 	}
 	if fiInfo.Size() == 0 {
-		db.keys = make(map[string]*Key)
+		db.keys = &Keys{
+			M:        make(map[string]*Key),
+			ReadyDel: make([]Key, 0, 1024),
+		}
 		return nil
 	}
 	keyData := make([]byte, fiInfo.Size())
@@ -101,7 +103,9 @@ func (db *DB) loadData() error {
 	if err != nil {
 		return err
 	}
-	defer dataFile.Close()
+	defer func() {
+		_ = dataFile.Close()
+	}()
 	_, err = io.Copy(&db.cache, dataFile)
 	if err != nil {
 		return err
@@ -128,19 +132,11 @@ func (db *DB) Put(key string, v any) error {
 		Offset: before,
 		Size:   size,
 	}
-	if oldKey := db.keys[key]; oldKey != nil {
-		if oldKey.Index != db.index {
-			go func() {
-				// 不是当前分块，需要同步
-				if err := db.async(oldKey); err != nil {
-					log.Println("async:", err)
-				}
-			}()
-		} else {
-			// 同步
-			if err := db.sync(oldKey, newKey); err != nil {
-				return err
-			}
+	if oldKey := db.keys.Get(key); oldKey != nil {
+		db.keys.Del(oldKey)
+		// 同步
+		if err := db.sync(oldKey, newKey); err != nil {
+			return err
 		}
 	}
 	if db.cache.Len()+size >= db.opt.BlockSize {
@@ -155,12 +151,12 @@ func (db *DB) Put(key string, v any) error {
 		}
 		db.files = append(db.files, dataFile)
 	}
-	db.keys[key] = newKey
+	db.keys.Set(key, newKey)
 	return nil
 }
 
 func (db *DB) Get(key string, v any) error {
-	keyInfo := db.keys[key]
+	keyInfo := db.keys.Get(key)
 	if keyInfo == nil {
 		return errors.New("keys not found")
 	}
@@ -194,59 +190,17 @@ func (db *DB) fSync(clean bool) error {
 	return nil
 }
 
-func (db *DB) sync(key *Key, newKey *Key) error {
+func (db *DB) sync(oldKey *Key, newKey *Key) error {
 	data := db.cache.Bytes()
 	db.cache.Truncate(0)
-	n, err := db.cache.Write(data[:key.Offset])
+	n, err := db.cache.Write(data[:oldKey.Offset])
 	if err != nil {
 		return err
 	}
 	newKey.Offset = n
-	n, err = db.cache.Write(data[key.Offset : key.Offset+key.Size])
+	n, err = db.cache.Write(data[oldKey.Offset : oldKey.Offset+oldKey.Size])
 	if err != nil {
 		return err
-	}
-	return nil
-}
-
-func (db *DB) async(key *Key) error {
-	fi := db.files[key.Index]
-	stat, err := fi.Stat()
-	if err != nil {
-		return err
-	}
-	// left dataFile
-	left := make([]byte, key.Offset)
-	_, err = fi.ReadAt(left, 0)
-	if err != nil {
-		return err
-	}
-	var right []byte
-	splitOffset := int64(key.Offset + key.Size)
-	if splitOffset < stat.Size() {
-		ret, _ := fi.Seek(splitOffset, io.SeekStart)
-		// 读取到结尾所有数据
-		right = make([]byte, stat.Size()-ret)
-		_, err = fi.Read(right)
-		if err != nil {
-			return err
-		}
-	}
-	// 清空文件
-	ret, _ := fi.Seek(0, io.SeekStart)
-	if err = fi.Truncate(ret); err != nil {
-		return err
-	}
-	// 重新写入数据
-	_, err = fi.Write(left)
-	if err != nil {
-		return err
-	}
-	if len(right) > 0 {
-		_, err = fi.Write(right)
-		if err != nil {
-			return err
-		}
 	}
 	return nil
 }
