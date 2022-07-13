@@ -42,7 +42,7 @@ func TestDB_PutSameKey(t *testing.T) {
 	defer func() {
 		_ = db.Close()
 	}()
-	for i := 0; i < 1000000; i++ {
+	for i := 0; i < 1000; i++ {
 		if err := db.Put("key", "value"); err != nil {
 			t.Error(err)
 		}
@@ -53,12 +53,12 @@ func TestDB_PutDiffKeyAndGet(t *testing.T) {
 	defer func() {
 		_ = db.Close()
 	}()
-	for i := 0; i < 1000000; i++ {
+	for i := 1; i <= 1000000; i++ {
 		if err := db.Put(strconv.Itoa(i), i); err != nil {
 			t.Error(err)
 		}
 	}
-	for i := 0; i < 1000000; i++ {
+	for i := 1; i <= 1000000; i++ {
 		var v int
 		if err := db.Get(strconv.Itoa(i), &v); err != nil || v != i {
 			t.Fatal(err)
@@ -81,7 +81,7 @@ func BenchmarkSameKeyGet(b *testing.B) {
 	defer func() {
 		_ = db.Close()
 	}()
-	var v string
+	var v int
 	for i := 0; i < b.N; i++ {
 		if err := db.Put("key", i); err != nil {
 			b.Error("put error")
@@ -104,13 +104,13 @@ func BenchmarkDiffKeyPut(b *testing.B) {
 }
 
 func BenchmarkDiffKeyGet(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for i := 1; i < b.N; i++ {
 		if err := db.Put(strconv.Itoa(i), i); err != nil {
 			b.Error("put error")
 		}
 	}
 	var v int
-	for i := 0; i < b.N; i++ {
+	for i := 1; i < b.N; i++ {
 		if err := db.Get(strconv.Itoa(i), &v); err != nil || v != i {
 			b.Error("get error", err)
 		}

@@ -1,7 +1,6 @@
 package simdb
 
 import (
-	"bytes"
 	"errors"
 	"github.com/kelindar/binary"
 	"io"
@@ -13,9 +12,10 @@ type DB struct {
 	dir      string
 	keys     *Keys
 	dataFile string
-	cache    bytes.Buffer
+	buf      []byte
 	index    int // current dataFile file index
 	opt      *Option
+	off      int
 	files    []*os.File
 }
 
@@ -35,7 +35,6 @@ func Open(dir string, opt *Option) (*DB, error) {
 	} else {
 		db.opt = opt
 	}
-	db.cache.Grow(db.opt.BlockSize)
 	if err := db.loadKeys(); err != nil {
 		return nil, err
 	}
@@ -57,10 +56,11 @@ func (db *DB) loadKeys() error {
 	if err != nil {
 		return err
 	}
-	if fiInfo.Size() == 0 {
+	db.off = int(fiInfo.Size())
+	if db.off == 0 {
 		db.keys = &Keys{
-			M:        make(map[string]*Key),
-			ReadyDel: make([]Key, 0, 1024),
+			M: make(map[string]*Key, 1024),
+			D: make([]Key, 0, 1024),
 		}
 		return nil
 	}
@@ -103,10 +103,20 @@ func (db *DB) loadData() error {
 	if err != nil {
 		return err
 	}
+	dataStat, err := dataFile.Stat()
+	if err != nil {
+		return err
+	}
 	defer func() {
 		_ = dataFile.Close()
 	}()
-	_, err = io.Copy(&db.cache, dataFile)
+	// 如果文件大小为0，没有数据不处理
+	if dataStat.Size() == 0 {
+		db.buf = make([]byte, db.opt.BlockSize, db.opt.BlockSize)
+		return nil
+	}
+	db.buf = make([]byte, dataStat.Size(), dataStat.Size())
+	_, err = dataFile.Read(db.buf)
 	if err != nil {
 		return err
 	}
@@ -122,24 +132,12 @@ func (db *DB) loadData() error {
 }
 
 func (db *DB) Put(key string, v any) error {
-	before := db.cache.Len()
-	if err := binary.MarshalTo(v, &db.cache); err != nil {
+	output, err := binary.Marshal(v)
+	if err != nil {
 		return err
 	}
-	size := db.cache.Len() - before
-	newKey := &Key{
-		Index:  db.index,
-		Offset: before,
-		Size:   size,
-	}
-	if oldKey := db.keys.Get(key); oldKey != nil {
-		db.keys.Del(oldKey)
-		// 同步
-		if err := db.sync(oldKey, newKey); err != nil {
-			return err
-		}
-	}
-	if db.cache.Len()+size >= db.opt.BlockSize {
+	size := len(output)
+	if db.off+size >= db.opt.BlockSize {
 		if err := db.fSync(true); err != nil {
 			return err
 		}
@@ -149,8 +147,27 @@ func (db *DB) Put(key string, v any) error {
 		if err != nil {
 			return err
 		}
+		db.off = 0
 		db.files = append(db.files, dataFile)
 	}
+	if oldKey := db.keys.Get(key); oldKey != nil {
+		if oldKey.Index == db.index {
+			// 立即操作
+			if oldKey.Size == size {
+				// 如果大小相同，则直接覆盖
+				copy(db.buf[oldKey.Offset:], output)
+				return nil
+			}
+		}
+		db.keys.Del(oldKey)
+	}
+	newKey := &Key{
+		Index:  db.index,
+		Offset: db.off,
+		Size:   size,
+	}
+	copy(db.buf[db.off:], output)
+	db.off += size
 	db.keys.Set(key, newKey)
 	return nil
 }
@@ -172,7 +189,7 @@ func (db *DB) readAt(key *Key, v any) error {
 			return err
 		}
 	} else {
-		data = db.cache.Bytes()[key.Offset : key.Offset+key.Size]
+		data = db.buf[key.Offset : key.Offset+key.Size]
 	}
 	if err := binary.Unmarshal(data, v); err != nil {
 		return err
@@ -181,26 +198,11 @@ func (db *DB) readAt(key *Key, v any) error {
 }
 
 func (db *DB) fSync(clean bool) error {
-	if err := os.WriteFile(db.dataFile, db.cache.Bytes(), 0755); err != nil {
+	if err := os.WriteFile(db.dataFile, db.buf[:db.off], 0755); err != nil {
 		return err
 	}
 	if clean {
-		db.cache.Reset()
-	}
-	return nil
-}
-
-func (db *DB) sync(oldKey *Key, newKey *Key) error {
-	data := db.cache.Bytes()
-	db.cache.Truncate(0)
-	n, err := db.cache.Write(data[:oldKey.Offset])
-	if err != nil {
-		return err
-	}
-	newKey.Offset = n
-	n, err = db.cache.Write(data[oldKey.Offset : oldKey.Offset+oldKey.Size])
-	if err != nil {
-		return err
+		db.buf = db.buf[:0]
 	}
 	return nil
 }

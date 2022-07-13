@@ -12,8 +12,8 @@ type Key struct {
 }
 
 type Keys struct {
-	ReadyDel []Key
-	M        map[string]*Key
+	D []Key
+	M map[string]*Key
 }
 
 func NewKeyMap(data []byte) (*Keys, error) {
@@ -26,7 +26,7 @@ func NewKeyMap(data []byte) (*Keys, error) {
 
 func (k *Keys) Marshal() ([]byte, error) {
 	buf := bytes.Buffer{}
-	buf.Grow(len(k.M)*12 + len(k.ReadyDel)*12)
+	buf.Grow(len(k.M)*12 + len(k.D)*12)
 	err := binary.MarshalTo(k, &buf)
 	if err != nil {
 		return nil, err
@@ -43,5 +43,5 @@ func (k *Keys) Get(key string) *Key {
 }
 
 func (k *Keys) Del(key *Key) {
-	k.ReadyDel = append(k.ReadyDel, *key)
+	k.D = append(k.D, *key)
 }
