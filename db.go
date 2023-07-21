@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 
 	_ "modernc.org/sqlite"
 )
@@ -15,8 +16,10 @@ type DB struct {
 }
 
 type Collection struct {
-	Fields []string
-	Values []any
+	mu       sync.RWMutex
+	selected bool
+	Fields   []string
+	Values   []any
 }
 
 // Open 打开数据库
@@ -72,41 +75,35 @@ func (d *DB) Document(collection string, docId int64) (*Document, error) {
 		if err != nil {
 			return nil, err
 		}
-		d.collections[collection] = &Collection{Fields: make([]string, 0), Values: make([]any, 0)}
 	}
-	// 查询记录
-	r, err := d.sqlite.Query("SELECT * FROM " + collection + " WHERE _ID = " + strconv.FormatInt(docId, 10))
-	if err != nil {
-		return nil, err
-	}
-	columns, err := r.Columns()
-	if err != nil {
-		r.Close()
-		return nil, err
-	}
-	values := make([]interface{}, len(columns))
-	for i := range values {
-		values[i] = new(any)
-	}
-	d.collections[collection] = &Collection{Fields: columns, Values: values}
-	if r.Next() {
-		err = r.Scan(d.collections[collection].Values...)
+	if !d.collections[collection].selected {
+		// 查询记录
+		r, err := d.sqlite.Query("SELECT * FROM " + collection + " WHERE _ID = " + strconv.FormatInt(docId, 10))
+		if err != nil {
+			return nil, err
+		}
+		columns, err := r.Columns()
 		if err != nil {
 			r.Close()
 			return nil, err
 		}
+		values := make([]interface{}, len(columns))
+		for i := range values {
+			values[i] = new(any)
+		}
+		c := &Collection{Fields: columns, Values: values}
+		if r.Next() {
+			err = r.Scan(c.Values...)
+			if err != nil {
+				r.Close()
+				return nil, err
+			}
+		}
+		r.Close()
+		c.selected = true
+		d.collections[collection] = c
 	}
-	r.Close()
-	return &Document{ID: docId, Name: collection, sqlite: d.sqlite, Collection: d.collections[collection]}, nil
-}
-
-// 删除文档
-func (d *DB) Delete(collection string, docId int64) error {
-	_, err := d.sqlite.Exec("DELETE FROM " + collection + " WHERE _ID = " + strconv.FormatInt(docId, 10))
-	if err != nil {
-		return err
-	}
-	return nil
+	return &Document{ID: docId, Name: collection, sqlite: d.sqlite, collection: d.collections[collection]}, nil
 }
 
 // Close 关闭数据库

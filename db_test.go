@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 )
 
 // 测试数据库
@@ -29,7 +30,12 @@ func TestDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	_, err = db.Document("test", 1000)
+	n := time.Now()
+	doc, err := db.Document("test", 1000)
+	fmt.Println("Fisrt get", time.Since(n).Microseconds(), "ms", doc)
+	n = time.Now()
+	doc, err = db.Document("test", 1000)
+	fmt.Println("Scendary get", time.Since(n).Nanoseconds(), "ns", doc)
 	if err != nil {
 		t.Fatal(err)
 	}
