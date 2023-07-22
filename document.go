@@ -223,6 +223,11 @@ func (d *Document) Put(key string, value any) error {
 	return nil
 }
 
+// PutByFields 设置文档
+func (d *Document) PutByFields(fields Fields) error {
+	return d.Puts(fields.GetKeys(), fields.GetValues())
+}
+
 // Get 获取文档键值
 func (d *Document) Get(key string) (any, error) {
 	// 内存中查询
@@ -232,6 +237,11 @@ func (d *Document) Get(key string) (any, error) {
 		}
 	}
 	return nil, nil
+}
+
+// GetFields 获取文档字段
+func (d *Document) GetByFields(fields Fields) ([]any, error) {
+	return d.Gets(fields.GetKeys()...)
 }
 
 // Delete 删除文档
