@@ -103,7 +103,7 @@ func (d *DB) Document(collection string, docId int64) (*Document, error) {
 		c.selected = true
 		d.collections[collection] = c
 	}
-	return &Document{ID: docId, Name: collection, sqlite: d.sqlite, collection: d.collections[collection]}, nil
+	return &Document{ID: docId, Name: collection, sqlite: d.sqlite, Collection: d.collections[collection]}, nil
 }
 
 // Close 关闭数据库

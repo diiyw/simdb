@@ -12,7 +12,7 @@ type Document struct {
 	sqlite      *sql.DB
 	Name        string
 	ID          int64
-	collection  *Collection
+	Collection  *Collection
 	preparation *preparation
 }
 
@@ -24,19 +24,19 @@ type preparation struct {
 
 // Prepares 准备文档
 func (d *Document) Prepares(key []string, value []any) *Document {
-	d.collection.mu.Lock()
-	defer d.collection.mu.Unlock()
+	d.Collection.mu.Lock()
+	defer d.Collection.mu.Unlock()
 	// 求Fields和Key的差集
 	var diff = make(map[string]int)
 	for i := 0; i < len(key); i++ {
 		found := false
-		for j := 0; j < len(d.collection.Fields); j++ {
-			if key[i] == d.collection.Fields[j] {
+		for j := 0; j < len(d.Collection.Fields); j++ {
+			if key[i] == d.Collection.Fields[j] {
 				found = true
 			}
 		}
 		if !found {
-			diff[key[i]] = len(d.collection.Values) + 1
+			diff[key[i]] = len(d.Collection.Values) + 1
 		}
 	}
 	if d.preparation == nil {
@@ -54,8 +54,8 @@ func (d *Document) Prepares(key []string, value []any) *Document {
 // Prepare 准备文档
 func (d *Document) Prepare(key string, value any) *Document {
 	found := false
-	for j := 0; j < len(d.collection.Fields); j++ {
-		if key == d.collection.Fields[j] {
+	for j := 0; j < len(d.Collection.Fields); j++ {
+		if key == d.Collection.Fields[j] {
 			found = true
 		}
 	}
@@ -72,8 +72,8 @@ func (d *Document) Prepare(key string, value any) *Document {
 
 // Save 保存文档
 func (d *Document) Save() error {
-	d.collection.mu.Lock()
-	defer d.collection.mu.Unlock()
+	d.Collection.mu.Lock()
+	defer d.Collection.mu.Unlock()
 	if d.preparation == nil {
 		return nil
 	}
@@ -108,7 +108,7 @@ func (d *Document) Save() error {
 	}
 	// 更新内存中的值
 	for i := 0; i < len(d.preparation.keys); i++ {
-		*d.collection.Values[d.preparation.diff[d.preparation.keys[i]]-1].(*any) = d.preparation.values[i]
+		*d.Collection.Values[d.preparation.diff[d.preparation.keys[i]]-1].(*any) = d.preparation.values[i]
 	}
 	d.preparation = nil
 	return nil
@@ -116,14 +116,14 @@ func (d *Document) Save() error {
 
 // Puts 设置文档
 func (d *Document) Puts(key []string, value []any) error {
-	d.collection.mu.Lock()
-	defer d.collection.mu.Unlock()
+	d.Collection.mu.Lock()
+	defer d.Collection.mu.Unlock()
 	// 求Fields和Key的差集
 	var diff = make(map[string]any)
 	for i := 0; i < len(key); i++ {
 		found := false
-		for j := 0; j < len(d.collection.Fields); j++ {
-			if key[i] == d.collection.Fields[j] {
+		for j := 0; j < len(d.Collection.Fields); j++ {
+			if key[i] == d.Collection.Fields[j] {
 				found = true
 			}
 		}
@@ -146,8 +146,8 @@ func (d *Document) Puts(key []string, value []any) error {
 			}
 		}
 		// 添加到Fields
-		d.collection.Fields = append(d.collection.Fields, field)
-		d.collection.Values = append(d.collection.Values, new(any))
+		d.Collection.Fields = append(d.Collection.Fields, field)
+		d.Collection.Values = append(d.Collection.Values, new(any))
 	}
 	// 更新数据库
 	var set strings.Builder
@@ -162,21 +162,21 @@ func (d *Document) Puts(key []string, value []any) error {
 	}
 	// 更新内存中的值
 	for i := 0; i < len(key); i++ {
-		*d.collection.Values[i].(*any) = value[i]
+		*d.Collection.Values[i].(*any) = value[i]
 	}
 	return nil
 }
 
 // Gets 获取文档键值
 func (d *Document) Gets(key ...string) ([]any, error) {
-	d.collection.mu.Lock()
-	defer d.collection.mu.Unlock()
+	d.Collection.mu.Lock()
+	defer d.Collection.mu.Unlock()
 	// 内存中查询
 	var values = make([]any, 0)
 	for i := 0; i < len(key); i++ {
-		for j := 0; j < len(d.collection.Fields); j++ {
-			if key[i] == d.collection.Fields[j] {
-				values = append(values, *d.collection.Values[j].(*any))
+		for j := 0; j < len(d.Collection.Fields); j++ {
+			if key[i] == d.Collection.Fields[j] {
+				values = append(values, *d.Collection.Values[j].(*any))
 			}
 		}
 	}
@@ -185,11 +185,11 @@ func (d *Document) Gets(key ...string) ([]any, error) {
 
 // Put 设置文档
 func (d *Document) Put(key string, value any) error {
-	d.collection.mu.Lock()
-	defer d.collection.mu.Unlock()
+	d.Collection.mu.Lock()
+	defer d.Collection.mu.Unlock()
 	found := false
-	for j := 0; j < len(d.collection.Fields); j++ {
-		if key == d.collection.Fields[j] {
+	for j := 0; j < len(d.Collection.Fields); j++ {
+		if key == d.Collection.Fields[j] {
 			found = true
 		}
 	}
@@ -215,11 +215,11 @@ func (d *Document) Put(key string, value any) error {
 		return err
 	}
 	// 添加到Fields
-	d.collection.Fields = append(d.collection.Fields, key)
+	d.Collection.Fields = append(d.Collection.Fields, key)
 	// 设置内存中的值
 	var a = new(any)
 	*a = value
-	d.collection.Values = append(d.collection.Values, a)
+	d.Collection.Values = append(d.Collection.Values, a)
 	return nil
 }
 
@@ -231,9 +231,9 @@ func (d *Document) PutByFields(fields Fields) error {
 // Get 获取文档键值
 func (d *Document) Get(key string) (any, error) {
 	// 内存中查询
-	for j := 0; j < len(d.collection.Fields); j++ {
-		if key == d.collection.Fields[j] {
-			return *d.collection.Values[j].(*any), nil
+	for j := 0; j < len(d.Collection.Fields); j++ {
+		if key == d.Collection.Fields[j] {
+			return *d.Collection.Values[j].(*any), nil
 		}
 	}
 	return nil, nil
@@ -246,9 +246,9 @@ func (d *Document) GetByFields(fields Fields) ([]any, error) {
 
 // Delete 删除文档
 func (d *Document) Delete() error {
-	d.collection.selected = false
-	d.collection.mu.Lock()
-	defer d.collection.mu.Unlock()
+	d.Collection.selected = false
+	d.Collection.mu.Lock()
+	defer d.Collection.mu.Unlock()
 	if _, err := d.sqlite.Exec("DELETE FROM " + d.Name + " WHERE _ID = " + strconv.FormatInt(d.ID, 10)); err != nil {
 		return err
 	}
@@ -257,18 +257,18 @@ func (d *Document) Delete() error {
 
 // DeleteKey 删除文档Key
 func (d *Document) DeleteKey(key string) error {
-	d.collection.mu.Lock()
-	defer d.collection.mu.Unlock()
+	d.Collection.mu.Lock()
+	defer d.Collection.mu.Unlock()
 	// 删除字段
 	_, err := d.sqlite.Exec("ALTER TABLE " + d.Name + " DROP COLUMN " + key)
 	if err != nil {
 		return err
 	}
 	// 删除内存中的key和value
-	for i := 0; i < len(d.collection.Fields); i++ {
-		if key == d.collection.Fields[i] {
-			d.collection.Fields = append(d.collection.Fields[:i], d.collection.Fields[i+1:]...)
-			d.collection.Values = append(d.collection.Values[:i], d.collection.Values[i+1:]...)
+	for i := 0; i < len(d.Collection.Fields); i++ {
+		if key == d.Collection.Fields[i] {
+			d.Collection.Fields = append(d.Collection.Fields[:i], d.Collection.Fields[i+1:]...)
+			d.Collection.Values = append(d.Collection.Values[:i], d.Collection.Values[i+1:]...)
 		}
 	}
 	return nil
