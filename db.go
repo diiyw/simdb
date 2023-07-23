@@ -11,15 +11,16 @@ import (
 )
 
 type DB struct {
-	sqlite      *sql.DB
-	collections map[string]*Collection
+	mu            sync.RWMutex
+	sqlite        *sql.DB
+	autoIncrement string
+	collections   map[string]*Collection
 }
 
 type Collection struct {
-	mu       sync.RWMutex
-	selected bool
-	Fields   []string
-	Values   []any
+	mu        sync.RWMutex
+	Fields    []string
+	Documents map[int64]*Document
 }
 
 // Open 打开数据库
@@ -45,7 +46,19 @@ func Open(dbFile string, opts ...Option) (*DB, error) {
 	for rows.Next() {
 		var name string
 		rows.Scan(&name)
-		d.collections[name] = &Collection{Fields: make([]string, 0), Values: make([]any, 0)}
+		d.collections[name] = &Collection{Documents: make(map[int64]*Document, 0)}
+		// 获取所有字段
+		r, err := db.Query("SELECT * FROM " + name + " LIMIT 0")
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+		cols, err := r.Columns()
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+		d.collections[name].Fields = cols
 	}
 	d.sqlite = db
 	for _, opt := range opts {
@@ -59,51 +72,58 @@ func Open(dbFile string, opts ...Option) (*DB, error) {
 
 // Document 获取文档
 func (d *DB) Document(collection string, docId int64) (*Document, error) {
-	if d.collections[collection] == nil {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	c := d.collections[collection]
+	if c == nil {
 		// 创建表
 		_, err := d.sqlite.Exec("CREATE TABLE IF NOT EXISTS " + collection + " (_ID INTEGER PRIMARY KEY AUTOINCREMENT)")
 		if err != nil {
 			return nil, err
 		}
 		// 修改自增值
-		_, err = d.sqlite.Exec("UPDATE sqlite_sequence SET seq = 1000 WHERE name = '" + collection + "'")
+		_, err = d.sqlite.Exec("UPDATE sqlite_sequence SET seq = " + d.autoIncrement + " WHERE name = '" + collection + "'")
 		if err != nil {
 			return nil, err
 		}
-		// 插入默认记录
-		_, err = d.sqlite.Exec("INSERT INTO " + collection + " (_ID) VALUES (1000)")
-		if err != nil {
-			return nil, err
-		}
+		c = &Collection{Documents: make(map[int64]*Document, 0), Fields: []string{"_ID"}}
+		d.collections[collection] = c
 	}
-	if !d.collections[collection].selected {
-		// 查询记录
-		r, err := d.sqlite.Query("SELECT * FROM " + collection + " WHERE _ID = " + strconv.FormatInt(docId, 10))
+	if c.Documents[docId] == nil {
+		// 查询数据
+		rows, err := d.sqlite.Query("SELECT * FROM " + collection + " WHERE _ID = " + strconv.FormatInt(docId, 10))
 		if err != nil {
 			return nil, err
 		}
-		columns, err := r.Columns()
-		if err != nil {
-			r.Close()
-			return nil, err
+		doc := &Document{
+			ID:         docId,
+			Name:       collection,
+			sqlite:     d.sqlite,
+			Collection: c,
+			Values:     make([]any, 0, len(c.Fields)),
 		}
-		values := make([]interface{}, len(columns))
-		for i := range values {
-			values[i] = new(any)
-		}
-		c := &Collection{Fields: columns, Values: values}
-		if r.Next() {
-			err = r.Scan(c.Values...)
+		if !rows.Next() {
+			// 没有记录，插入默认记录
+			_, err := d.sqlite.Exec("INSERT INTO " + collection + " (_ID) VALUES (" + strconv.FormatInt(docId, 10) + ")")
 			if err != nil {
-				r.Close()
+				return nil, err
+			}
+			a := new(any)
+			*a = docId
+			doc.Values = append(doc.Values, a)
+			c.Documents[docId] = doc
+		} else {
+			for i := 0; i < len(c.Fields); i++ {
+				doc.Values = append(doc.Values, new(any))
+			}
+			err = rows.Scan(doc.Values...)
+			if err != nil {
 				return nil, err
 			}
 		}
-		r.Close()
-		c.selected = true
-		d.collections[collection] = c
+		c.Documents[docId] = doc
 	}
-	return &Document{ID: docId, Name: collection, sqlite: d.sqlite, Collection: d.collections[collection]}, nil
+	return c.Documents[docId], nil
 }
 
 // Close 关闭数据库

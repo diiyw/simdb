@@ -31,11 +31,11 @@ func TestDocument(t *testing.T) {
 	}
 	defer db.Close()
 	n := time.Now()
-	doc, err := db.Document("test", 1000)
-	fmt.Println("Fisrt get", time.Since(n).Microseconds(), "ms", doc)
+	doc1, _ := db.Document("test", 1000)
+	fmt.Println("Fisrt get", time.Since(n).Microseconds(), "us", doc1)
 	n = time.Now()
-	doc, err = db.Document("test", 1000)
-	fmt.Println("Scendary get", time.Since(n).Nanoseconds(), "ns", doc)
+	doc2, err := db.Document("test", 1000)
+	fmt.Println("Scendary get", time.Since(n).Nanoseconds(), "ns", doc2)
 	if err != nil {
 		t.Fatal(err)
 	}

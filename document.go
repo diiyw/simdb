@@ -13,6 +13,7 @@ type Document struct {
 	Name        string
 	ID          int64
 	Collection  *Collection
+	Values      []any
 	preparation *preparation
 }
 
@@ -36,7 +37,7 @@ func (d *Document) Prepares(key []string, value []any) *Document {
 			}
 		}
 		if !found {
-			diff[key[i]] = len(d.Collection.Values) + 1
+			diff[key[i]] = len(d.Values) + 1
 		}
 	}
 	if d.preparation == nil {
@@ -108,7 +109,7 @@ func (d *Document) Save() error {
 	}
 	// 更新内存中的值
 	for i := 0; i < len(d.preparation.keys); i++ {
-		*d.Collection.Values[d.preparation.diff[d.preparation.keys[i]]-1].(*any) = d.preparation.values[i]
+		*d.Values[d.preparation.diff[d.preparation.keys[i]]-1].(*any) = d.preparation.values[i]
 	}
 	d.preparation = nil
 	return nil
@@ -147,7 +148,7 @@ func (d *Document) Puts(key []string, value []any) error {
 		}
 		// 添加到Fields
 		d.Collection.Fields = append(d.Collection.Fields, field)
-		d.Collection.Values = append(d.Collection.Values, new(any))
+		d.Values = append(d.Values, new(any))
 	}
 	// 更新数据库
 	var set strings.Builder
@@ -162,7 +163,7 @@ func (d *Document) Puts(key []string, value []any) error {
 	}
 	// 更新内存中的值
 	for i := 0; i < len(key); i++ {
-		*d.Collection.Values[i].(*any) = value[i]
+		*d.Values[i].(*any) = value[i]
 	}
 	return nil
 }
@@ -176,7 +177,7 @@ func (d *Document) Gets(key ...string) ([]any, error) {
 	for i := 0; i < len(key); i++ {
 		for j := 0; j < len(d.Collection.Fields); j++ {
 			if key[i] == d.Collection.Fields[j] {
-				values = append(values, *d.Collection.Values[j].(*any))
+				values = append(values, *d.Values[j].(*any))
 			}
 		}
 	}
@@ -219,7 +220,7 @@ func (d *Document) Put(key string, value any) error {
 	// 设置内存中的值
 	var a = new(any)
 	*a = value
-	d.Collection.Values = append(d.Collection.Values, a)
+	d.Values = append(d.Values, a)
 	return nil
 }
 
@@ -233,7 +234,7 @@ func (d *Document) Get(key string) (any, error) {
 	// 内存中查询
 	for j := 0; j < len(d.Collection.Fields); j++ {
 		if key == d.Collection.Fields[j] {
-			return *d.Collection.Values[j].(*any), nil
+			return *d.Values[j].(*any), nil
 		}
 	}
 	return nil, nil
@@ -246,12 +247,13 @@ func (d *Document) GetByFields(fields Fields) ([]any, error) {
 
 // Delete 删除文档
 func (d *Document) Delete() error {
-	d.Collection.selected = false
 	d.Collection.mu.Lock()
 	defer d.Collection.mu.Unlock()
 	if _, err := d.sqlite.Exec("DELETE FROM " + d.Name + " WHERE _ID = " + strconv.FormatInt(d.ID, 10)); err != nil {
 		return err
 	}
+	// 删除内存中的文档
+	delete(d.Collection.Documents, d.ID)
 	return nil
 }
 
@@ -268,7 +270,7 @@ func (d *Document) DeleteKey(key string) error {
 	for i := 0; i < len(d.Collection.Fields); i++ {
 		if key == d.Collection.Fields[i] {
 			d.Collection.Fields = append(d.Collection.Fields[:i], d.Collection.Fields[i+1:]...)
-			d.Collection.Values = append(d.Collection.Values[:i], d.Collection.Values[i+1:]...)
+			d.Values = append(d.Values[:i], d.Values[i+1:]...)
 		}
 	}
 	return nil
