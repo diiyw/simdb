@@ -100,7 +100,7 @@ func (d *DB) Document(collection string, docId int64) (*Document, error) {
 			Name:       collection,
 			sqlite:     d.sqlite,
 			Collection: c,
-			Values:     make([]any, 0, len(c.Fields)),
+			Values:     make([]any, len(c.Fields)),
 		}
 		if !rows.Next() {
 			// 没有记录，插入默认记录
@@ -110,11 +110,11 @@ func (d *DB) Document(collection string, docId int64) (*Document, error) {
 			}
 			a := new(any)
 			*a = docId
-			doc.Values = append(doc.Values, a)
+			doc.Values[0] = a
 			c.Documents[docId] = doc
 		} else {
 			for i := 0; i < len(c.Fields); i++ {
-				doc.Values = append(doc.Values, new(any))
+				doc.Values[i] = new(any)
 			}
 			err = rows.Scan(doc.Values...)
 			if err != nil {

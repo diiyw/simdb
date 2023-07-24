@@ -7,28 +7,20 @@ import (
 	"time"
 )
 
-// 测试数据库
-func TestOpenDB(t *testing.T) {
+var db *DB
+
+func init() {
 	path, err := os.Getwd()
 	if err != nil {
-		t.Fatal(err)
+		panic(err)
 	}
-	db, err := Open(path + "/testdata/data/test.db")
+	db, err = Open(path+"/testdata/data/test.db", WithAutoIncrement(1000))
 	if err != nil {
-		t.Fatal(err)
+		panic(err)
 	}
-	db.Close()
 }
 
 func TestDocument(t *testing.T) {
-	path, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	db, err := Open(path + "/testdata/data/test.db")
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer db.Close()
 	n := time.Now()
 	doc1, _ := db.Document("test", 1000)
@@ -42,14 +34,6 @@ func TestDocument(t *testing.T) {
 }
 
 func TestDocumentPuts(t *testing.T) {
-	path, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	db, err := Open(path + "/testdata/data/test.db")
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer db.Close()
 	doc, err := db.Document("test", 1000)
 	if err != nil {
@@ -62,14 +46,6 @@ func TestDocumentPuts(t *testing.T) {
 }
 
 func TestDocumentGetKeys(t *testing.T) {
-	path, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	db, err := Open(path + "/testdata/data/test.db")
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer db.Close()
 	doc, err := db.Document("test", 1000)
 	if err != nil {
@@ -84,4 +60,21 @@ func TestDocumentGetKeys(t *testing.T) {
 		t.Fatal("age error")
 	}
 	fmt.Println(r)
+}
+
+func BenchmarkGet(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		doc, err := db.Document("test", 1266)
+		if err != nil {
+			b.Fatal(err)
+		}
+		r, err := doc.Gets([]string{"name", "age"}...)
+		if err != nil {
+			b.Fatal(err.Error())
+		}
+
+		if r == nil {
+			b.Fatal("age error")
+		}
+	}
 }
